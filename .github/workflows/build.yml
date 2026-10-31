@@ -8,6 +8,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: unzip -q project-1.zip -d proj
+      - name: Set proxy URL and fix open command
+        run: |
+          sed -i 's#https://YOUR-PROXY.example.com/chat#https://goooooooo.alialmalcky.workers.dev/#' proj/app/build.gradle.kts
+          sed -i 's/(افتح|/(افتح|إفتح|/' proj/app/src/main/java/com/tiger/assistant/CommandRouter.kt
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
