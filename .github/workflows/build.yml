@@ -8,10 +8,121 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: unzip -q project-1.zip -d proj
-      - name: Set proxy URL and fix open command
+      - name: Set proxy URL
         run: |
           sed -i 's#https://YOUR-PROXY.example.com/chat#https://goooooooo.alialmalcky.workers.dev/#' proj/app/build.gradle.kts
-          sed -i 's/(افتح|/(افتح|إفتح|/' proj/app/src/main/java/com/tiger/assistant/CommandRouter.kt
+      - name: Voice commands and YouTube search
+        run: |
+          D=proj/app/src/main/java/com/tiger/assistant
+          cat > $D/CommandRouter.kt <<'EOF'
+          package com.tiger.assistant
+
+          sealed interface Command {
+              data class OpenApp(val name: String) : Command
+              data class Ask(val text: String) : Command
+          }
+
+          object CommandRouter {
+              private val openRegex = Regex(
+                  "^(?:قم ب)?(?:افتح|إفتح|أفتح|فتح|شغل|شغّل|تشغيل|روح على|روح الى|روح إلى|ادخل على|ادخل الى)\\s+(.+)$"
+              )
+              private val ytSearchRegex = Regex(
+                  "^(?:ابحث|دور)\\s+(?:في|على)\\s+(?:ال)?(?:يوتيوب|يوتوب)\\s+(?:عن\\s+)?(.+)$"
+              )
+
+              fun parse(raw: String): Command {
+                  val text = raw.trim()
+                  ytSearchRegex.find(text)?.let {
+                      return Command.OpenApp("يوتيوب ابحث عن " + it.groupValues[1].trim())
+                  }
+                  openRegex.find(text)?.let {
+                      return Command.OpenApp(it.groupValues[1].trim())
+                  }
+                  return Command.Ask(text)
+              }
+          }
+          EOF
+          cat > $D/AppLauncher.kt <<'EOF'
+          package com.tiger.assistant
+
+          import android.app.SearchManager
+          import android.content.Context
+          import android.content.Intent
+          import android.net.Uri
+
+          class AppLauncher(private val ctx: Context) {
+
+              private val aliases = mapOf(
+                  "يوتيوب" to "youtube",
+                  "يوتوب" to "youtube",
+                  "نتفلكس" to "netflix",
+                  "نتفليكس" to "netflix",
+                  "شاهد" to "shahid",
+                  "إعدادات" to "settings",
+                  "اعدادات" to "settings",
+                  "الإعدادات" to "settings",
+                  "كروم" to "chrome",
+                  "سبوتيفاي" to "spotify",
+                  "ديزني" to "disney",
+                  "بلاي ستور" to "play store"
+              )
+
+              private val searchRegex = Regex("^(.+?)\\s+و?ابحث(?:\\s+عن)?\\s+(.+)$")
+
+              private fun isYouTube(s: String) =
+                  s.contains("يوتيوب") || s.contains("يوتوب") || s.lowercase().contains("youtube")
+
+              fun open(spokenName: String): Boolean {
+                  val text = spokenName.trim()
+                  val m = searchRegex.find(text)
+                  if (m != null && isYouTube(m.groupValues[1])) {
+                      return searchYouTube(m.groupValues[2].trim())
+                  }
+                  return openByName(text)
+              }
+
+              private fun searchYouTube(query: String): Boolean {
+                  val pkgs = listOf("com.google.android.youtube.tv", "com.google.android.youtube")
+                  for (pkg in pkgs) {
+                      try {
+                          val i = Intent(Intent.ACTION_SEARCH).setPackage(pkg)
+                              .putExtra(SearchManager.QUERY, query)
+                              .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                          ctx.startActivity(i)
+                          return true
+                      } catch (e: Exception) { }
+                  }
+                  return try {
+                      val url = "https://www.youtube.com/results?search_query=" + Uri.encode(query)
+                      ctx.startActivity(
+                          Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                      )
+                      true
+                  } catch (e: Exception) { false }
+              }
+
+              private fun openByName(spoken: String): Boolean {
+                  val pm = ctx.packageManager
+                  val key = spoken.trim().removePrefix("ال")
+                  val target = (aliases[key] ?: aliases[spoken.trim()] ?: key).lowercase()
+
+                  val leanback = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
+                  val normal = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+                  val apps = pm.queryIntentActivities(leanback, 0) + pm.queryIntentActivities(normal, 0)
+
+                  val match = apps.firstOrNull {
+                      it.loadLabel(pm).toString().lowercase().contains(target)
+                  } ?: return false
+
+                  val launch = pm.getLeanbackLaunchIntentForPackage(match.activityInfo.packageName)
+                      ?: pm.getLaunchIntentForPackage(match.activityInfo.packageName)
+                      ?: return false
+                  launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                  ctx.startActivity(launch)
+                  return true
+              }
+          }
+          EOF
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
